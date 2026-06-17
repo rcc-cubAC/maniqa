@@ -64,8 +64,12 @@ python filter_frames.py /path/to/video.mp4 /path/to/out_dir \
 
 ## Programmatic API (cameras)
 
-对一批 `camera_control` 的 `Camera` 直接打分（每个 `camera.toImage()` 给出 MANIQA 画质分 +
-SuperPoint 关键点数量），接口风格对齐 pixel-align-deform 用到的各库：
+对一批 `Camera` 直接打分（每个 `camera.toImage()` 给出 MANIQA 画质分 + SuperPoint 关键点数量），
+接口风格对齐 pixel-align-deform 用到的各库。
+
+> 这里的 `Camera` 来自自研库 [camera-control](https://github.com/565353780/camera-control)（**非 pip 包**，
+> 与本仓库平级 clone 后 `./setup.sh` 安装，或加入 PYTHONPATH）。运行期只用到 `camera.toImage()`，
+> 故未安装它时本仓库其余功能（`demo.py` / `filter_frames.py`）不受影响。
 
 ```python
 from maniqa.API.image_iqa import build_model, query_cameras_quality

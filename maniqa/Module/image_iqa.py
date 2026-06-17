@@ -1,13 +1,19 @@
+from __future__ import annotations
+
 import torch
 import numpy as np
-from typing import List, Union
+from typing import TYPE_CHECKING, List, Union
 
 from tqdm import tqdm
 
-from camera_control.Module.camera import Camera
-
 from maniqa.Module.predictor import Predictor
 from maniqa.Module.keypoint_detector import KeypointDetector
+
+if TYPE_CHECKING:
+    # camera_control 是自研库（github.com/565353780/camera-control），非 pip 包，
+    # 这里仅用于类型标注。运行期对 camera 只依赖其 ``.toImage()`` 接口（鸭子类型），
+    # 故未安装 camera-control 也能 import 本模块。
+    from camera_control.Module.camera import Camera
 
 
 class ImageIQA(object):

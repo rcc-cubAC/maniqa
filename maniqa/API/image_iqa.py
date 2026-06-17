@@ -9,15 +9,19 @@
 ``build_model`` 默认 ``is_offload_cpu=True``：两个模型平时只加载到 CPU，仅在
 ``query_cameras_quality`` 推理窗口内整批搬到 GPU、跑完立刻卸回 CPU。
 """
+from __future__ import annotations
+
 import os
 
 import torch
 
-from typing import List
-
-from camera_control.Module.camera import Camera
+from typing import TYPE_CHECKING, List
 
 from maniqa.Module.image_iqa import ImageIQA
+
+if TYPE_CHECKING:
+    # 自研库（非 pip），仅类型标注用；见 maniqa/Module/image_iqa.py 说明。
+    from camera_control.Module.camera import Camera
 
 
 home = os.environ['HOME']
