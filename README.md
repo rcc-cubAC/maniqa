@@ -62,6 +62,20 @@ python filter_frames.py /path/to/video.mp4 /path/to/out_dir \
 两者量纲差异大，故各自 **min-max 归一化到 [0,1]** 后按权重线性融合，再按融合分保留 top-ratio——
 既避免糊帧，又避免纹理贫乏的帧。权重与硬门槛均可调。
 
+## Programmatic API (cameras)
+
+对一批 `camera_control` 的 `Camera` 直接打分（每个 `camera.toImage()` 给出 MANIQA 画质分 +
+SuperPoint 关键点数量），接口风格对齐 pixel-align-deform 用到的各库：
+
+```python
+from maniqa.API.image_iqa import build_model, query_cameras_quality
+
+# is_offload_cpu=True（默认）：两个模型平时只在 CPU，仅推理时整批搬到 GPU，跑完立刻卸回
+image_iqa = build_model(device='cuda:0', is_offload_cpu=True)
+scores = query_cameras_quality(image_iqa, camera_list)  # torch.Tensor [N, 2] float32
+# scores[:, 0] = MANIQA 画质分；scores[:, 1] = SuperPoint 关键点数量
+```
+
 ## Structure
 
 ```bash

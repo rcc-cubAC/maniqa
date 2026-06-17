@@ -28,13 +28,18 @@ class KeypointDetector(object):
         model_conf: Union[dict, None] = None,
         dtype='auto',
         device: str = 'cpu',
+        is_offload_cpu: bool = False,
     ) -> None:
         self.device = device
         self.dtype = torch.float32 if dtype in ('auto', None) else dtype
+        # offload 模式：权重常驻 CPU，``count()``/``detect()`` 推理窗口内才上 GPU；
+        # ``toGPU()`` 可把模型钉在 GPU 上做批量推理。
+        self.is_offload_cpu = bool(is_offload_cpu)
 
         conf = dict(SUPERPOINT_DEFAULT_CONF if model_conf is None else model_conf)
+        load_device = 'cpu' if self.is_offload_cpu else self.device
         self.model = SuperPoint(**conf)
-        self.model = self.model.to(self.device, dtype=self.dtype)
+        self.model = self.model.to(load_device, dtype=self.dtype)
         self.model.eval()
         self.model.requires_grad_(False)
 
@@ -42,6 +47,37 @@ class KeypointDetector(object):
         if model_file_path is not None:
             self.loadModel(model_file_path)
         return
+
+    def _isModelOnDevice(self) -> bool:
+        '''模型参数是否已在 self.device。'''
+        try:
+            param = next(self.model.parameters())
+        except StopIteration:
+            return True
+        return param.device.type == torch.device(self.device).type
+
+    def _ensureModelOnDevice(self) -> bool:
+        '''确保模型在 self.device，返回本次是否发生了搬运。'''
+        if self._isModelOnDevice():
+            return False
+        self.model = self.model.to(self.device)
+        return True
+
+    def _offloadModelToCPU(self) -> None:
+        '''把模型卸回 CPU 并清显存。'''
+        self.model = self.model.to('cpu')
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    def toGPU(self) -> 'KeypointDetector':
+        '''把模型常驻到 self.device（批量推理前调用）。'''
+        self.model = self.model.to(self.device)
+        return self
+
+    def toCPU(self) -> 'KeypointDetector':
+        '''把模型卸回 CPU。'''
+        self._offloadModelToCPU()
+        return self
 
     def loadModel(self, model_file_path: str) -> bool:
         if not os.path.exists(model_file_path):
@@ -69,8 +105,13 @@ class KeypointDetector(object):
     @torch.no_grad()
     def detect(self, image_chw: np.ndarray) -> dict:
         '''对一张 CHW RGB([0,1]) 图跑 SuperPoint -> 完整输出 dict。'''
-        image = imageToTensor(image_chw, self.device, self.dtype)
-        return self.model({"image": image})
+        moved_to_gpu_this_call = self._ensureModelOnDevice()
+        try:
+            image = imageToTensor(image_chw, self.device, self.dtype)
+            return self.model({"image": image})
+        finally:
+            if moved_to_gpu_this_call and self.is_offload_cpu:
+                self._offloadModelToCPU()
 
     @torch.no_grad()
     def count(self, image_chw: np.ndarray) -> int:

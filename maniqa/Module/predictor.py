@@ -45,10 +45,14 @@ class Predictor(object):
         std: float = 0.5,
         dtype='auto',
         device: str = 'cpu',
+        is_offload_cpu: bool = False,
     ) -> None:
         self.device = device
         # MANIQA 分数在 fp32 标定，'auto' 不走 bf16，保持与原版数值一致。
         self.dtype = torch.float32 if dtype in ('auto', None) else dtype
+        # offload 模式：权重常驻 CPU，``predict()`` 推理窗口内才搬到 ``self.device``；
+        # ``toGPU()`` 可把模型钉在 GPU 上做批量推理，期间逐次 predict 不再来回搬。
+        self.is_offload_cpu = bool(is_offload_cpu)
         self.num_crops = num_crops
         self.crop_size = crop_size
         self.mean = mean
@@ -57,8 +61,9 @@ class Predictor(object):
         config = dict(MANIQA_DEFAULT_CONFIG if model_config is None else model_config)
         self.crop_size = config.get('img_size', self.crop_size)
 
+        load_device = 'cpu' if self.is_offload_cpu else self.device
         self.model = MANIQA(**config)
-        self.model = self.model.to(self.device, dtype=self.dtype)
+        self.model = self.model.to(load_device, dtype=self.dtype)
         self.model.eval()
         self.model.requires_grad_(False)
 
@@ -66,6 +71,37 @@ class Predictor(object):
         if model_file_path is not None:
             self.loadModel(model_file_path)
         return
+
+    def _isModelOnDevice(self) -> bool:
+        '''模型参数是否已在 self.device。'''
+        try:
+            param = next(self.model.parameters())
+        except StopIteration:
+            return True
+        return param.device.type == torch.device(self.device).type
+
+    def _ensureModelOnDevice(self) -> bool:
+        '''确保模型在 self.device，返回本次是否发生了搬运（决定推理后是否卸载）。'''
+        if self._isModelOnDevice():
+            return False
+        self.model = self.model.to(self.device)
+        return True
+
+    def _offloadModelToCPU(self) -> None:
+        '''把模型卸回 CPU 并清显存。'''
+        self.model = self.model.to('cpu')
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    def toGPU(self) -> 'Predictor':
+        '''把模型常驻到 self.device（批量推理前调用，避免逐次搬运）。'''
+        self.model = self.model.to(self.device)
+        return self
+
+    def toCPU(self) -> 'Predictor':
+        '''把模型卸回 CPU。'''
+        self._offloadModelToCPU()
+        return self
 
     def loadModel(self, model_file_path: str) -> bool:
         if not os.path.exists(model_file_path):
@@ -95,11 +131,16 @@ class Predictor(object):
     @torch.no_grad()
     def predict(self, image_chw: np.ndarray) -> float:
         '''对一张 CHW RGB([0,1]) 图打质量分（裁块 -> 前向 -> 平均）。'''
-        image_chw = resizeMinSide(image_chw, self.crop_size + 1)
-        patches = randomCropPatches(image_chw, self.num_crops, self.crop_size)
-        patches_tensor = preprocessPatches(patches, self.mean, self.std, self.device, self.dtype)
-        scores = scorePatches(self.model, patches_tensor)  # [N]
-        return float(scores.mean().item())
+        moved_to_gpu_this_call = self._ensureModelOnDevice()
+        try:
+            image_chw = resizeMinSide(image_chw, self.crop_size + 1)
+            patches = randomCropPatches(image_chw, self.num_crops, self.crop_size)
+            patches_tensor = preprocessPatches(patches, self.mean, self.std, self.device, self.dtype)
+            scores = scorePatches(self.model, patches_tensor)  # [N]
+            return float(scores.mean().item())
+        finally:
+            if moved_to_gpu_this_call and self.is_offload_cpu:
+                self._offloadModelToCPU()
 
     @torch.no_grad()
     def predictFile(self, image_file_path: str) -> Union[float, None]:
