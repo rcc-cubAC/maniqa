@@ -31,7 +31,8 @@ class ImageIQA(object):
         self,
         maniqa_model_file_path: Union[str, None] = None,
         superpoint_model_file_path: Union[str, None] = None,
-        dtype='auto',
+        maniqa_dtype=torch.float16,
+        superpoint_dtype=torch.float32,
         device: str = 'cuda:0',
         is_offload_cpu: bool = True,
         allow_tf32: bool = True,
@@ -39,9 +40,11 @@ class ImageIQA(object):
         self.device = device
         self.is_offload_cpu = bool(is_offload_cpu)
 
-        # MANIQA 是 compute-bound 的（ViT/8 + TAB 通道注意力），fp32 下 A800 张量核
-        # 几乎闲置，打 batch 也不提速。打开 TF32 让 matmul 走张量核，约 3x 提速且分数
-        # 与 fp32 逐位一致（实测 kunkun 仍 0.3398）。需要严格 IEEE-fp32 时置 False。
+        # MANIQA 是 compute-bound（ViT/8 + TAB 通道注意力），fp32 下 A800 张量核几乎闲置，
+        # 打 batch 也不提速；真正提速靠降精度。默认 MANIQA 跑 **fp16**（约 6x，分数较 fp32
+        # 仅 ~1e-3 漂移：kunkun 0.3398->0.3396）。SuperPoint 只占 ~9ms，且 fp16 会让 NMS/
+        # 阈值轻微改动关键点计数，故保持 **fp32** 计数稳定。需严格 fp32 画质分时把
+        # maniqa_dtype 设回 torch.float32。
         self.allow_tf32 = bool(allow_tf32)
         if self.allow_tf32:
             torch.backends.cuda.matmul.allow_tf32 = True
@@ -49,13 +52,13 @@ class ImageIQA(object):
 
         self.predictor = Predictor(
             model_file_path=maniqa_model_file_path,
-            dtype=dtype,
+            dtype=maniqa_dtype,
             device=device,
             is_offload_cpu=self.is_offload_cpu,
         )
         self.keypoint_detector = KeypointDetector(
             model_file_path=superpoint_model_file_path,
-            dtype=dtype,
+            dtype=superpoint_dtype,
             device=device,
             is_offload_cpu=self.is_offload_cpu,
         )

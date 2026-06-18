@@ -42,7 +42,8 @@ def get_default_model_paths() -> dict:
 def build_model(
     maniqa_model_file_path: str = maniqa_model_file_path,
     superpoint_model_file_path: str = superpoint_model_file_path,
-    dtype='auto',
+    maniqa_dtype=torch.float16,
+    superpoint_dtype=torch.float32,
     device: str = 'cuda:0',
     is_offload_cpu: bool = True,
     allow_tf32: bool = True,
@@ -51,12 +52,14 @@ def build_model(
 
     ``is_offload_cpu`` 默认 ``True``：MANIQA / SuperPoint 平时常驻 CPU，仅推理时
     搬到 ``device`` 并在结束后立刻卸回；``False`` 则加载后整体常驻 ``device``。
-    ``allow_tf32`` 默认 ``True``：matmul 走 TF32 张量核，约 3x 提速且分数与 fp32 一致。
+    ``maniqa_dtype`` 默认 ``torch.float16``（约 6x，画质分较 fp32 ~1e-3 漂移）；
+    SuperPoint 默认 fp32 保持关键点计数稳定。需严格 fp32 画质分时设 ``torch.float32``。
     '''
     return ImageIQA(
         maniqa_model_file_path=maniqa_model_file_path,
         superpoint_model_file_path=superpoint_model_file_path,
-        dtype=dtype,
+        maniqa_dtype=maniqa_dtype,
+        superpoint_dtype=superpoint_dtype,
         device=device,
         is_offload_cpu=is_offload_cpu,
         allow_tf32=allow_tf32,

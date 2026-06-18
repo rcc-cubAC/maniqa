@@ -80,10 +80,11 @@ scores = image_iqa.query_cameras_quality(camera_list, batch_size=8)  # torch.Ten
 # scores[:, 0] = MANIQA 画质分；scores[:, 1] = SuperPoint 关键点数量
 ```
 
-提速说明：瓶颈是 MANIQA（ViT/8 + TAB 通道注意力），**compute-bound，打 batch 不提速**；
-真正有效的是 `allow_tf32=True`（默认）——matmul 走张量核，**约 3x 且分数与 fp32 逐位一致**
-（实测 200 张相机筛选 73s→26s，保留集完全不变）。`batch_size` 主要打满 GPU / 加速 SuperPoint，
-可按显存调；想再快可建模型时传 `dtype=torch.float16`（约 6x，分数有 ~1e-3 级微小漂移）。
+提速说明：瓶颈是 MANIQA（ViT/8 + TAB 通道注意力），**compute-bound，打 batch 不提速**，
+真正有效的是降精度。默认 **MANIQA 跑 fp16**（约 6x），SuperPoint 保持 fp32（计数稳定）；
+另开 `allow_tf32=True`（默认）。实测 200 张相机筛选 **73s→16s（4.6x，峰值 9.5GB）**，
+保留集与 fp32 完全一致（max |Δ画质|≈4.5e-4，没有边界帧翻动）。需严格 fp32 画质分时
+`build_model(maniqa_dtype=torch.float32)`；`batch_size` 主要打满 GPU / 加速 SuperPoint，可按显存调。
 
 ## Structure
 
