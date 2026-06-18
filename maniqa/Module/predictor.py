@@ -7,6 +7,7 @@ from maniqa.Model.maniqa import MANIQA
 from maniqa.Method.predict import (
     resizeMinSide,
     randomCropPatches,
+    maskedRandomCropPatches,
     preprocessPatches,
     scorePatches,
     predictFile,
@@ -161,6 +162,34 @@ class Predictor(object):
             patches_tensor = preprocessPatches(patches, self.mean, self.std, self.device, self.dtype)
             scores = scorePatches(self.model, patches_tensor)    # [B*num_crops]
             scores = scores.view(len(images_chw), self.num_crops).mean(dim=1)  # [B]
+            return scores.detach().cpu().tolist()
+        finally:
+            if moved_to_gpu_this_call and self.is_offload_cpu:
+                self._offloadModelToCPU()
+
+    @torch.no_grad()
+    def predictMaskedBatch(
+        self,
+        images_chw: List[np.ndarray],
+        masks_hw: List[Union[np.ndarray, None]],
+        min_mask_ratio: float = 0.5,
+    ) -> List[float]:
+        '''批量打分，但每张图的裁块只落在各自 mask 前景内（见 maskedRandomCropPatches）。
+
+        与 predictBatch 同样把各图的块拼成一个 batch 一次前向；mask 为 None 的图退回整图裁。
+        '''
+        if len(images_chw) == 0:
+            return []
+        moved_to_gpu_this_call = self._ensureModelOnDevice()
+        try:
+            patches_per_image = [
+                maskedRandomCropPatches(image_chw, mask_hw, self.num_crops, self.crop_size, min_mask_ratio)
+                for image_chw, mask_hw in zip(images_chw, masks_hw)
+            ]
+            patches = np.concatenate(patches_per_image, axis=0)
+            patches_tensor = preprocessPatches(patches, self.mean, self.std, self.device, self.dtype)
+            scores = scorePatches(self.model, patches_tensor)
+            scores = scores.view(len(images_chw), self.num_crops).mean(dim=1)
             return scores.detach().cpu().tolist()
         finally:
             if moved_to_gpu_this_call and self.is_offload_cpu:

@@ -78,6 +78,9 @@ from maniqa.API.image_iqa import build_model, query_cameras_quality
 image_iqa = build_model(device='cuda:0', is_offload_cpu=True)   # allow_tf32=True 默认
 scores = image_iqa.query_cameras_quality(camera_list, batch_size=8)  # torch.Tensor [N, 2] float32
 # scores[:, 0] = MANIQA 画质分；scores[:, 1] = SuperPoint 关键点数量
+
+# 只评估前景（物体）：随机裁块只落在 camera.mask 内、SuperPoint 只计 mask 内关键点
+scores = image_iqa.query_cameras_masked_quality(camera_list, batch_size=8, min_mask_ratio=0.5)
 ```
 
 提速说明：瓶颈是 MANIQA（ViT/8 + TAB 通道注意力），**compute-bound，打 batch 不提速**，

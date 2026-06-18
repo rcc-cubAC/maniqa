@@ -4,7 +4,12 @@ import numpy as np
 from typing import List, Union
 
 from maniqa.Model.superpoint import SuperPoint
-from maniqa.Method.detect_keypoints import imageToTensor, countKeypoints, countKeypointsFile
+from maniqa.Method.detect_keypoints import (
+    imageToTensor,
+    countKeypoints,
+    countKeypointsInMask,
+    countKeypointsFile,
+)
 
 # 与 rpautrat SuperPoint.default_conf 对齐，需要调灵敏度时覆盖（如 detection_threshold / nms_radius）。
 SUPERPOINT_DEFAULT_CONF = {
@@ -133,6 +138,28 @@ class KeypointDetector(object):
             image = torch.from_numpy(batch).to(device=self.device, dtype=self.dtype)
             output = self.model({"image": image})
             return [int(keypoints.shape[0]) for keypoints in output["keypoints"]]
+        finally:
+            if moved_to_gpu_this_call and self.is_offload_cpu:
+                self._offloadModelToCPU()
+
+    @torch.no_grad()
+    def countInMaskBatch(
+        self,
+        images_chw: List[np.ndarray],
+        masks_hw: List[Union[np.ndarray, None]],
+    ) -> List[int]:
+        '''批量检测关键点，但每张只计落在各自 mask 前景内的点。要求同尺寸。'''
+        if len(images_chw) == 0:
+            return []
+        moved_to_gpu_this_call = self._ensureModelOnDevice()
+        try:
+            batch = np.stack(images_chw, axis=0)
+            image = torch.from_numpy(batch).to(device=self.device, dtype=self.dtype)
+            output = self.model({"image": image})
+            return [
+                countKeypointsInMask(keypoints, mask_hw)
+                for keypoints, mask_hw in zip(output["keypoints"], masks_hw)
+            ]
         finally:
             if moved_to_gpu_this_call and self.is_offload_cpu:
                 self._offloadModelToCPU()

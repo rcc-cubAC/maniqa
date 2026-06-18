@@ -67,6 +67,52 @@ def randomCropPatches(image_chw: np.ndarray, num_crops: int, crop_size: int) -> 
     return patches
 
 
+def maskedRandomCropPatches(
+    image_chw: np.ndarray,
+    mask_hw: Union[np.ndarray, None],
+    num_crops: int,
+    crop_size: int,
+    min_mask_ratio: float = 0.5,
+    max_tries: int = 20,
+) -> np.ndarray:
+    '''随机裁 num_crops 个块，但每块都锚定在 mask 前景像素上（保证落在物体内）。
+
+    mask_hw: 与图对齐的 (H, W) bool；为 None 或无前景时退回整图随机裁。
+    每块随机取一个前景像素作锚点、令块包含它（越界则 clamp）；``min_mask_ratio`` > 0 时
+    在 ``max_tries`` 次内优先取前景占比 >= 该比例的块，取不到则用占比最高的那次。
+    '''
+    if mask_hw is None:
+        return randomCropPatches(image_chw, num_crops, crop_size)
+
+    c, h, w = image_chw.shape
+    ys, xs = np.nonzero(mask_hw)
+    if len(ys) == 0:
+        return randomCropPatches(image_chw, num_crops, crop_size)
+
+    max_top = max(h - crop_size, 0)
+    max_left = max(w - crop_size, 0)
+    patches = np.empty((num_crops, c, crop_size, crop_size), dtype=np.float32)
+    for i in range(num_crops):
+        best_top = best_left = 0
+        best_ratio = -1.0
+        for _ in range(max_tries):
+            j = np.random.randint(0, len(ys))
+            top = int(min(max(int(ys[j]) - crop_size // 2, 0), max_top))
+            left = int(min(max(int(xs[j]) - crop_size // 2, 0), max_left))
+            if min_mask_ratio <= 0.0:
+                best_top, best_left = top, left
+                break
+            ratio = float(mask_hw[top:top + crop_size, left:left + crop_size].mean())
+            if ratio >= min_mask_ratio:
+                best_top, best_left = top, left
+                break
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_top, best_left = top, left
+        patches[i] = image_chw[:, best_top:best_top + crop_size, best_left:best_left + crop_size]
+    return patches
+
+
 def normalizePatches(patches: np.ndarray, mean: float, std: float) -> np.ndarray:
     '''逐元素 (x - mean) / std。'''
     return (patches - mean) / std

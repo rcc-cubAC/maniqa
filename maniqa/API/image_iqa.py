@@ -73,3 +73,19 @@ def query_cameras_quality(image_iqa: ImageIQA, camera_list: List[Camera]) -> tor
         torch.Tensor，形状 [N, 2]，float32，CPU。
     '''
     return image_iqa.query_cameras_quality(camera_list)
+
+
+def query_cameras_masked_quality(
+    image_iqa: ImageIQA,
+    camera_list: List[Camera],
+    min_mask_ratio: float = 0.5,
+) -> torch.Tensor:
+    '''带 mask 的打分：只评估每个相机的前景（物体）区域。
+
+    随机裁块只落在 camera 的 mask 内、SuperPoint 只计 mask 内关键点；其余同
+    ``query_cameras_quality``。无 mask 的相机退化为整图。
+
+    Returns:
+        torch.Tensor，形状 [N, 2]，float32，CPU。
+    '''
+    return image_iqa.query_cameras_masked_quality(camera_list, min_mask_ratio=min_mask_ratio)
