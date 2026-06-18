@@ -1,7 +1,7 @@
 import os
 import torch
 import numpy as np
-from typing import Union
+from typing import List, Union
 
 from maniqa.Model.superpoint import SuperPoint
 from maniqa.Method.detect_keypoints import imageToTensor, countKeypoints, countKeypointsFile
@@ -117,6 +117,25 @@ class KeypointDetector(object):
     def count(self, image_chw: np.ndarray) -> int:
         '''关键点数量（特征丰富度信号）。'''
         return countKeypoints(self.detect(image_chw))
+
+    @torch.no_grad()
+    def countBatch(self, images_chw: List[np.ndarray]) -> List[int]:
+        '''批量统计关键点：同尺寸的图 stack 成一个 batch 一次前向。
+
+        要求 ``images_chw`` 内所有图 H,W 相同（调用方按尺寸分组）。SuperPoint 的
+        b>1 路径逐图独立做 NMS / 阈值提取，故每张计数与逐张 ``count`` 完全一致。
+        '''
+        if len(images_chw) == 0:
+            return []
+        moved_to_gpu_this_call = self._ensureModelOnDevice()
+        try:
+            batch = np.stack(images_chw, axis=0)  # [B, C, H, W]
+            image = torch.from_numpy(batch).to(device=self.device, dtype=self.dtype)
+            output = self.model({"image": image})
+            return [int(keypoints.shape[0]) for keypoints in output["keypoints"]]
+        finally:
+            if moved_to_gpu_this_call and self.is_offload_cpu:
+                self._offloadModelToCPU()
 
     @torch.no_grad()
     def countFile(self, image_file_path: str) -> Union[int, None]:

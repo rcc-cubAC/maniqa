@@ -1,7 +1,7 @@
 import os
 import torch
 import numpy as np
-from typing import Union
+from typing import List, Union
 
 from maniqa.Model.maniqa import MANIQA
 from maniqa.Method.predict import (
@@ -138,6 +138,30 @@ class Predictor(object):
             patches_tensor = preprocessPatches(patches, self.mean, self.std, self.device, self.dtype)
             scores = scorePatches(self.model, patches_tensor)  # [N]
             return float(scores.mean().item())
+        finally:
+            if moved_to_gpu_this_call and self.is_offload_cpu:
+                self._offloadModelToCPU()
+
+    @torch.no_grad()
+    def predictBatch(self, images_chw: List[np.ndarray]) -> List[float]:
+        '''批量打分：每张图各裁 num_crops 块，所有块拼成一个 batch 一次前向。
+
+        裁块顺序与逐张 ``predict`` 完全一致（同一 RNG 序列），故分数逐张相同，只是
+        把 B 张图的 B*num_crops 个块合并前向以打满 GPU。返回长度 B 的分数列表。
+        '''
+        if len(images_chw) == 0:
+            return []
+        moved_to_gpu_this_call = self._ensureModelOnDevice()
+        try:
+            patches_per_image = []
+            for image_chw in images_chw:
+                image_chw = resizeMinSide(image_chw, self.crop_size + 1)
+                patches_per_image.append(randomCropPatches(image_chw, self.num_crops, self.crop_size))
+            patches = np.concatenate(patches_per_image, axis=0)  # [B*num_crops, C, h, w]
+            patches_tensor = preprocessPatches(patches, self.mean, self.std, self.device, self.dtype)
+            scores = scorePatches(self.model, patches_tensor)    # [B*num_crops]
+            scores = scores.view(len(images_chw), self.num_crops).mean(dim=1)  # [B]
+            return scores.detach().cpu().tolist()
         finally:
             if moved_to_gpu_this_call and self.is_offload_cpu:
                 self._offloadModelToCPU()
